@@ -1,0 +1,204 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Proex — tokens extraidos da referencia.
+   fundo quente quase-preto, texto creme, acento âmbar.
+--------------------------------------------------------------------------- */
+:root {
+  --background: 20 8% 8%;
+  --foreground: 40 33% 94%;
+
+  --card: 20 7% 11%;
+  --card-foreground: 40 33% 94%;
+
+  --muted: 20 6% 14%;
+  --muted-foreground: 38 8% 62%;
+
+  --border: 20 8% 18%;
+  --input: 20 8% 22%;
+
+  --primary: 15 63% 60%;
+  --primary-foreground: 20 8% 8%;
+
+  --accent: 15 63% 60%;
+  --accent-foreground: 20 8% 8%;
+
+  --success: 150 55% 45%;
+  --danger: 4 72% 56%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-body), system-ui, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04';
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, h4, h5 {
+    font-family: var(--font-display), system-ui, sans-serif;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.35);
+    color: hsl(var(--foreground));
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+    border: 2px solid hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@layer components {
+  /* --- container de secao ------------------------------------------------ */
+  .section {
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }
+
+  /* --- superficie de card ------------------------------------------------ */
+  .surface {
+    @apply rounded-2xl border border-border bg-card;
+    box-shadow: 0 1px 0 0 hsl(var(--foreground) / 0.03) inset;
+  }
+
+  .surface-hover {
+    @apply transition-all duration-300 hover:border-primary/40;
+    box-shadow:
+      0 1px 0 0 hsl(var(--foreground) / 0.03) inset,
+      0 24px 60px -40px rgba(0, 0, 0, 0.9);
+  }
+
+  /* --- texto com gradiente âmbar ---------------------------------------- */
+  .text-premium {
+    background: linear-gradient(
+      100deg,
+      hsl(var(--foreground)) 0%,
+      hsl(var(--primary)) 45%,
+      hsl(var(--foreground)) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* --- faixa de brilho atrás do hero ------------------------------------ */
+  .glow::before {
+    content: '';
+    position: absolute;
+    inset: -40% 0 auto;
+    height: 70%;
+    background: radial-gradient(
+      ellipse 55% 50% at 50% 30%,
+      hsl(var(--primary) / 0.18),
+      transparent 70%
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* --- grade de pontos sutil -------------------------------------------- */
+  .grid-bg {
+    background-image:
+      linear-gradient(hsl(var(--foreground) / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--foreground) / 0.035) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 35%, #000 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 35%, #000 30%, transparent 75%);
+  }
+
+  /* --- badge ------------------------------------------------------------ */
+  .badge {
+    @apply inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3.5 py-1.5 text-xs font-medium text-primary;
+  }
+
+  /* --- botao ------------------------------------------------------------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-primary-foreground shadow-glow hover:brightness-110 active:scale-[0.98];
+  }
+  .btn-outline {
+    @apply btn border border-border bg-transparent text-foreground hover:border-primary/50 hover:bg-primary/10;
+  }
+  .btn-ghost {
+    @apply btn text-muted-foreground hover:bg-muted hover:text-foreground;
+  }
+  .btn-sm {
+    @apply px-3.5 py-2 text-xs;
+  }
+
+  /* --- input ------------------------------------------------------------- */
+  .input {
+    @apply w-full rounded-xl border border-input bg-muted/50 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/60 focus:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/25 transition;
+  }
+
+  /* --- terminal ---------------------------------------------------------- */
+  .terminal {
+    @apply overflow-hidden rounded-2xl border border-border bg-[#0d0c0b];
+    box-shadow: 0 30px 70px -45px rgba(0, 0, 0, 1);
+  }
+  .terminal__bar {
+    @apply flex items-center gap-2 border-b border-border bg-white/[0.03] px-4 py-3;
+  }
+  .terminal__dot {
+    @apply h-3 w-3 rounded-full;
+  }
+  .terminal__body {
+    @apply overflow-x-auto p-5 font-mono text-[13px] leading-relaxed;
+  }
+}
+
+@layer utilities {
+  .fade-up {
+    animation: fade-up 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* regua de 80M/h — barra de rate limit */
+  .rate-bar {
+    background-image: repeating-linear-gradient(
+      115deg,
+      hsl(var(--primary) / 0.9) 0 8px,
+      hsl(var(--primary) / 0.35) 8px 18px
+    );
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
