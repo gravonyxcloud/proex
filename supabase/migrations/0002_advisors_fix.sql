@@ -103,3 +103,23 @@ alter policy "webhook_events: admin only" on public.webhook_events
 alter policy "license_events: admin only" on public.license_events
   to authenticated
   using ((select public.is_admin()));
+
+-- is_admin(): tirar do schema exposto (advisor authenticated_security_definer) --
+-- 1. funcao real vai para private (nao exposta via PostgREST /rpc).
+alter function public.is_admin() set schema private;
+-- 2. policies ainda chamam public.is_admin() -> wrapper SECURITY INVOKER,
+--    search_path vazio, delega para private.is_admin().
+create function public.is_admin()
+returns boolean
+language sql
+stable
+security invoker
+set search_path to ''
+as $$ select private.is_admin() $$;
+revoke execute on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated, service_role;
+-- 3. private.is_admin() precisa de EXECUTE no caller (RLS roda com privileges
+--    do role da sessao, nao do dono da tabela).
+grant execute on function private.is_admin() to anon, authenticated, service_role;
+-- Leak de password: habilitado no dashboard (Auth -> Settings -> Password).
+-- Sem equivalente SQL no Postgres; protecao e aplicada pelo GoTrue.
