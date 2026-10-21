@@ -214,7 +214,6 @@ export const FOOTER = {
       links: [
         { label: 'Planos', href: '/precos' },
         { label: 'Como configurar', href: '/#como-funciona' },
-        { label: 'Como configurar', href: '/#como-funciona' },
       ],
     },
     {

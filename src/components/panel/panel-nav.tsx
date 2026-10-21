@@ -10,6 +10,7 @@ const LINKS = [
   { href: '/painel', label: 'Início', icon: '◈' },
   { href: '/painel/pagamentos', label: 'Pagamentos', icon: '◫' },
   { href: '/painel/uso', label: 'Uso', icon: '◔' },
+  { href: '/painel/conta', label: 'Conta', icon: '◉' },
   { href: '/painel/suporte', label: 'Suporte', icon: '✉' },
 ] as const;
 
