@@ -1,18 +1,19 @@
 -- ===========================================================================
 -- Proex — correcoes apontadas pelos advisors do Supabase (security + performance)
--- Projeto qacoswxzvviifsatvwxi. Fonte de verdade: aplicado via execute_sql.
---
--- NAO grava entrada no historico de migrations do Supabase (execute_sql nao
--- cria historico). Se um dia for usado `supabase db pull`, reconciliar este
--- arquivo com o que vier de la.
+-- Projeto qacoswxzvviifsatvwxi. Aplicado via apply_migration (entra no
+-- historico de migrations do Supabase com name = 0002_advisors_fix).
+-- Reaplicacao segura: create or replace / alter policy / grants idempotentes.
 --
 -- IMPORTANTE — sem DROP: o servidor MCP do Supabase recusa (status "declined")
 -- instrucoes destrutivas como DROP e DELETE. Por isso as policies sao
 -- reescritas com ALTER POLICY, que alcanca o mesmo resultado sem DROP.
 --
 -- Ver: get_advisors(security) e get_advisors(performance) — pos-este-arquivo:
---   security   -> 2 WARN restantes, ambos public.is_admin() (intencionais)
+--   security   -> 0 WARN de function; so auth_leaked_password_protection
+--                 (setting do dashboard Auth, sem equivalente SQL)
 --   performance-> zero WARN; so unused_index (INFO, banco vazio)
+-- Nota: anon mantem EXECUTE em public.is_admin() — policy "plans: read active
+-- or admin" roda para roles = public (precos sem sessao) e depende disso.
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
@@ -106,18 +107,41 @@ alter policy "license_events: admin only" on public.license_events
 
 -- is_admin(): tirar do schema exposto (advisor authenticated_security_definer) --
 -- 1. funcao real vai para private (nao exposta via PostgREST /rpc).
-alter function public.is_admin() set schema private;
+--    Guard: so move se a copia em public ainda for SECURITY DEFINER e
+--    private ainda nao tiver a copia (reaplicacao em banco ja corrigido).
+do $$
+begin
+  if exists (
+       select 1
+         from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'is_admin' and p.prosecdef
+     )
+     and not exists (
+       select 1
+         from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'private' and p.proname = 'is_admin'
+     ) then
+    execute 'alter function public.is_admin() set schema private';
+  end if;
+end
+$$;
 -- 2. policies ainda chamam public.is_admin() -> wrapper SECURITY INVOKER,
 --    search_path vazio, delega para private.is_admin().
-create function public.is_admin()
+create or replace function public.is_admin()
 returns boolean
 language sql
 stable
 security invoker
 set search_path to ''
 as $$ select private.is_admin() $$;
-revoke execute on function public.is_admin() from public, anon;
-grant execute on function public.is_admin() to authenticated, service_role;
+-- 3. EXECUTE: wrapper so devolve "sou admin?" (boolean), sem dados.
+--    Revogamos apenas o grant PUBLIC-by-default (vale para todo role).
+--    anon segue explicito: policy "plans: read active or admin" roda para
+--    roles = public (leitura de precos sem sessao) e depende de EXECUTE.
+revoke execute on function public.is_admin() from public;
+grant execute on function public.is_admin() to anon, authenticated, service_role;
 -- 3. private.is_admin() precisa de EXECUTE no caller (RLS roda com privileges
 --    do role da sessao, nao do dono da tabela).
 grant execute on function private.is_admin() to anon, authenticated, service_role;
