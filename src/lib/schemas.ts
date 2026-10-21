@@ -39,6 +39,16 @@ export const signupSchema = z.object({
 
 export const resetSchema = z.object({ email: emailSchema });
 
+export const newPasswordSchema = z
+  .object({
+    password: passwordSchema,
+    confirm: z.string().min(1, 'Confirme a nova senha.'),
+  })
+  .refine((data) => data.password === data.confirm, {
+    message: 'As senhas não coincidem.',
+    path: ['confirm'],
+  });
+
 export const planUpsertSchema = z.object({
   slug: planSlugSchema,
   name: z.string().trim().min(3, 'Nome muito curto.').max(80),
