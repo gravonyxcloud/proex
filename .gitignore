@@ -13,3 +13,8 @@ npm-debug.log*
 .vercel
 .env*
 !.env.example
+
+# artefatos locais de skills/inspecao
+.taste-skill/
+.claude/skills/
+.claude/tmp_*
