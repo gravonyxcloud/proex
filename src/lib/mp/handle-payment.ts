@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { activateLicense, LicenseApiError } from '@/lib/license-api';
+import { activateLicense, LicenseApiError, renewLicense } from '@/lib/license-api';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { Order, OrderStatus } from '@/types/db';
 
@@ -154,7 +154,93 @@ export async function processPayment(facts: PaymentFacts, actor = 'system'): Pro
     return { orderId: order.id, action: 'already', detail: 'Chave já emitida para este pedido.' };
   }
 
-  // 6. emite a chave na API upstream
+  // 6. cliente já tem chave ativa? renova mantendo a MESMA chave e somando o prazo
+  //    ao vencimento atual (política do gateway). Nenhuma chave nova é criada.
+  const { data: priorLicense } = await supabase
+    .from('licenses')
+    .select('id, key, expires_at')
+    .eq('customer_email', order.customer_email)
+    .neq('status', 'revoked')
+    .order('expires_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (priorLicense) {
+    // Idempotência: o Mercado Pago reenvia o webhook. Se este pedido já
+    // emitiu, não soma o prazo duas vezes.
+    if (order.license_issued) {
+      return { orderId: order.id, action: 'already', detail: 'Renovação já processada.' };
+    }
+
+    try {
+      const renewal = await renewLicense({
+        email: order.customer_email,
+        key: priorLicense.key,
+        planSlug: order.plan_slug,
+        orderId: order.external_reference,
+      });
+
+      const key = renewal.license?.key ?? priorLicense.key;
+
+      // O gateway soma o prazo ao vencimento atual. Nunca aceitamos um
+      // retorno menor que o vencimento que já existia — se a chave nunca
+      // vencia, continua não vencendo.
+      const upstreamExpires = renewal.license?.expiresAt ?? null;
+      let expiresAt = priorLicense.expires_at;
+      if (priorLicense.expires_at && upstreamExpires) {
+        const next = new Date(upstreamExpires);
+        const prev = new Date(priorLicense.expires_at);
+        if (!Number.isNaN(next.getTime()) && next.getTime() > prev.getTime()) {
+          expiresAt = next.toISOString();
+        }
+      }
+
+      await supabase
+        .from('licenses')
+        .update({
+          key,
+          key_hint: keyHint(key),
+          plan_slug: order.plan_slug,
+          status: 'active',
+          expires_at: expiresAt,
+          customer_id: order.customer_id,
+        })
+        .eq('id', priorLicense.id);
+
+      await supabase.from('orders').update({ license_issued: true, license_error: null }).eq('id', order.id);
+
+      await logLicenseEvent({
+        licenseId: priorLicense.id,
+        orderId: order.id,
+        action: 'renew',
+        detail:
+          `Renovação do plano ${order.plan_slug} sobre a chave ${keyHint(key)}. ` +
+          `Vencimento ${
+            expiresAt ? new Date(expiresAt).toLocaleDateString('pt-BR') : 'sem vencimento'
+          } (soma ao vencimento anterior).`,
+        actor,
+      });
+
+      return { orderId: order.id, action: 'issued', detail: `Chave renovada: ${keyHint(key)}.` };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Falha ao renovar a licença.';
+
+      // O pagamento CONTINUA aprovado: o dinheiro entrou. A falha vira
+      // erro recuperável com botão de reprocessar no admin.
+      await supabase.from('orders').update({ license_error: message }).eq('id', order.id);
+      await logLicenseEvent({
+        licenseId: priorLicense.id,
+        orderId: order.id,
+        action: 'failed',
+        detail: message,
+        actor,
+      });
+
+      return { orderId: order.id, action: 'license_error', detail: message };
+    }
+  }
+
+  // 7. emite a chave na API upstream
   try {
     const activation = await activateLicense({
       email: order.customer_email,
