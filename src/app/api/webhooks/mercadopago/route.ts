@@ -104,6 +104,8 @@ export async function POST(req: NextRequest) {
 
   const supabase = createAdminClient();
 
+  let eventId: string | null = null;
+
   try {
     // Fonte de verdade: busca o pagamento no Mercado Pago em vez de confiar
     // no corpo da notificação (que pode estar atrasado ou incompleto).
@@ -118,35 +120,48 @@ export async function POST(req: NextRequest) {
       transaction_amount: payment.transaction_amount,
       installments: payment.installments,
       date_approved: payment.date_approved,
+      fee_details: payment.fee_details,
+      transaction_details: payment.transaction_details,
     };
 
-    // event_id identifica uma TRANSIÇÃO, não uma entrega: o mesmo evento
-    // reenviado cai no ON CONFLICT e vira no-op.
-    const eventId = `pay:${facts.id}:${payment.status ?? 'unknown'}:${payment.date_last_updated ?? 'na'}`;
-
-    const { error: insertErr } = await supabase.from('webhook_events').insert({
-      event_id: eventId,
-      topic: topic ?? 'payment',
-      mp_payment_id: facts.id,
-      status_raw: payment.status ?? null,
-      payload: sanitize(payment as unknown as Record<string, unknown>),
-      result: 'processed',
-    });
-
-    if (insertErr) {
-      if (insertErr.code === '23505') {
-        return NextResponse.json({ received: true, duplicate: true });
-      }
-      throw new Error(insertErr.message);
-    }
+    // event_id identifica uma TRANSIÇÃO do pagamento. A linha é gravada só
+    // DEPOIS do processamento: antes já nascia como 'processed' e um reenvio
+    // caía no 23505 — se o processamento tivesse falhado, nunca mais seria
+    // reprocessado (o 200 de resposta já faz o MP parar de reentregar).
+    eventId = `pay:${facts.id}:${payment.status ?? 'unknown'}:${payment.date_last_updated ?? 'na'}`;
 
     const result = await processPayment(facts, 'webhook');
+
+    const { error: insertErr } = await supabase.from('webhook_events').upsert(
+      {
+        event_id: eventId,
+        topic: topic ?? 'payment',
+        mp_payment_id: facts.id,
+        status_raw: payment.status ?? null,
+        payload: sanitize(payment as unknown as Record<string, unknown>),
+        // license_error vira 'error' para aparecer na fila de erros do admin;
+        // após um reprocessamento bem-sucedido o upsert volta para 'processed'.
+        result:
+          result.action === 'license_error'
+            ? 'error'
+            : result.action === 'issued' || result.action === 'already'
+              ? 'processed'
+              : 'ignored',
+        error: result.action === 'license_error' ? result.detail : null,
+      },
+      { onConflict: 'event_id' },
+    );
+    if (insertErr) throw new Error(insertErr.message);
+
     return NextResponse.json({ received: true, ...result });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao processar notificação.';
 
+    // insert (não upsert): não sobrescreve um registro 'processed' válido.
+    // O 'error' fica visível no admin; o próximo reenvio reprocessa e o
+    // upsert de sucesso sobrescreve a linha.
     await supabase.from('webhook_events').insert({
-      event_id: `err:${idStr}:${Date.now()}`,
+      event_id: eventId ?? `err:${idStr}:${Date.now()}`,
       topic: topic ?? 'payment',
       mp_payment_id: idStr,
       payload: null,

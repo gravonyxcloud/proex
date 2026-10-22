@@ -13,7 +13,28 @@ export function webhookUrl(): string {
 }
 
 export function backUrl(order: Order): string {
-  return `${SITE.url.replace(/\/+$/, '')}/checkout/retorno?orderId=${order.id}`;
+  // O retorno do Checkout Pro chega SÓ com orderId (o Mercado Pago redireciona
+  // para as back_urls). Sem o e-mail a /checkout/retorno não acha o pedido e
+  // mostra "Pedido inválido" para um comprador que já pagou.
+  const email = encodeURIComponent(order.customer_email);
+  return `${SITE.url.replace(/\/+$/, '')}/checkout/retorno?orderId=${order.id}&email=${email}`;
+}
+
+/**
+ * Segura martelada na API do Mercado Pago: no máximo 3 pedidos em aberto
+ * (pending/in_process) por e-mail em 10 minutos. Cada checkout cria um
+ * pagamento real no MP, então sem teto um script dispara quantos quiser.
+ */
+export async function tooManyOpenOrders(email: string): Promise<boolean> {
+  const supabase = createAdminClient();
+  const { count } = await supabase
+    .from('orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('customer_email', email.toLowerCase())
+    .in('status', ['pending', 'in_process'])
+    .gte('created_at', new Date(Date.now() - 10 * 60_000).toISOString());
+
+  return (count ?? 0) >= 3;
 }
 
 /** Plano ativo ou lança — o preço vem do BANCO, nunca do cliente. */
@@ -155,22 +176,43 @@ export async function createCheckoutPreference(order: Order, plan: Plan) {
 }
 
 /** Estado atual da ordem + chave emitida, para o polling do /checkout/retorno. */
-export async function getOrderState(orderId: string) {
+export async function getOrderState(
+  orderId: string,
+  opts?: { licencaPorEmail?: boolean },
+) {
   const supabase = createAdminClient();
 
   const { data: order } = await supabase
     .from('orders')
-    .select('id, status, method, amount_brl, plan_slug, customer_email, license_issued, license_error, paid_at, created_at, external_reference')
+    .select('id, status, method, amount_brl, plan_slug, customer_email, license_issued, license_error, paid_at, created_at, external_reference, mp_payment_id')
     .eq('id', orderId)
     .single();
 
   if (!order) return null;
 
-  const { data: license } = await supabase
+  const { data: licenseByOrder } = await supabase
     .from('licenses')
     .select('id, key, key_hint, status, expires_at, plan_slug')
     .eq('order_id', orderId)
     .maybeSingle();
+
+  let license = licenseByOrder ?? null;
+
+  // A renovação não troca licenses.order_id (o vínculo continua com o pedido
+  // original). Sem este fallback o retorno de uma renovação nunca encontraria
+  // a chave e o comprador ficaria preso no spinner. Só quando o pedido está
+  // aprovado E license_issued — para não mascarar uma emissão que falhou.
+  if (!license && opts?.licencaPorEmail && order.status === 'approved' && order.license_issued) {
+    const { data: licenseByEmail } = await supabase
+      .from('licenses')
+      .select('id, key, key_hint, status, expires_at, plan_slug')
+      .eq('customer_email', order.customer_email)
+      .neq('status', 'revoked')
+      .order('expires_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    license = licenseByEmail ?? null;
+  }
 
   return { order: order as Order, license };
 }

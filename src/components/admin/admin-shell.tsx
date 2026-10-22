@@ -10,6 +10,7 @@ const LINKS = [
   { href: '/admin/pagamentos', label: 'Pagamentos', icon: '◫' },
   { href: '/admin/webhooks', label: 'Webhooks', icon: '↯' },
   { href: '/admin/uso', label: 'Consumo', icon: '◔' },
+  { href: '/admin/contabilidade', label: 'Contabilidade', icon: '⟐' },
   { href: '/admin/docs', label: 'Docs da API', icon: '⌘' },
 ] as const;
 

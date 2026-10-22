@@ -60,6 +60,37 @@ export const planUpsertSchema = z.object({
   sort: z.coerce.number().int().min(0).max(999).optional(),
 });
 
+/** Taxas da operação em /admin/contabilidade. Ver migration *_0003_*.sql */
+export const appSettingsSchema = z.object({
+  store_name: z.string().trim().min(1, 'Informe o nome da loja.').max(60),
+  mp_fee_percent: z.coerce
+    .number()
+    .min(0, 'A taxa não pode ser negativa.')
+    .max(100, 'A taxa não pode passar de 100%.'),
+  mp_fee_fixed_brl: z.coerce.number().min(0, 'A taxa fixa não pode ser negativa.').max(999),
+  tax_percent: z.coerce
+    .number()
+    .min(0, 'A reserva não pode ser negativa.')
+    .max(100, 'A reserva não pode passar de 100%.'),
+});
+
+export const withdrawalSchema = z.object({
+  amount_brl: z.coerce
+    .number({ invalid_type_error: 'Informe um valor.' })
+    .positive('O valor do saque precisa ser maior que zero.')
+    .max(9_999_999, 'Valor acima do limite.'),
+  // input type="date" manda 'YYYY-MM-DD'; data pura (sem fuso) evita o dia
+  // pular quando o navegador está em outro offset.
+  withdrawn_at: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida.')
+    .optional(),
+  method: z.enum(['pix', 'ted', 'transferencia', 'dinheiro', 'outro']),
+  destination: z.string().trim().max(120, 'Destino muito longo.').optional().nullable(),
+  note: z.string().trim().max(280, 'Observação muito longa.').optional().nullable(),
+});
+
 export const licenseActionSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('activate'),

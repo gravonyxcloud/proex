@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { createClient, getSessionUser } from '@/lib/supabase/server';
-import { createPixPayment, createOrder, getActivePlan } from '@/lib/checkout';
+import { createPixPayment, createOrder, getActivePlan, tooManyOpenOrders } from '@/lib/checkout';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +20,14 @@ export async function POST(req: NextRequest) {
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: 'Informe um e-mail válido.' }, { status: 400 });
+    }
+
+    // Teto por e-mail: cada checkout cria um pagamento real no Mercado Pago.
+    if (await tooManyOpenOrders(email)) {
+      return NextResponse.json(
+        { error: 'Muitos pedidos em aberto para este e-mail. Aguarde alguns minutos.' },
+        { status: 429 },
+      );
     }
 
     const user = await getSessionUser();

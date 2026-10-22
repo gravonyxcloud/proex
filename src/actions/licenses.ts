@@ -3,9 +3,10 @@
 import { revalidatePath } from 'next/cache';
 
 import { activateLicense, LicenseApiError, renewLicense } from '@/lib/license-api';
+import { deliverLicenseEmail } from '@/lib/mail';
 import { expiresFrom, keyHint, logLicenseEvent } from '@/lib/mp/handle-payment';
 import { getPlan } from '@/lib/plans';
-import { licenseActionSchema } from '@/lib/schemas';
+import { emailSchema, licenseActionSchema } from '@/lib/schemas';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import type { ActionState } from '@/actions/plans';
@@ -223,6 +224,52 @@ export async function adminRevoke(
     };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : 'Falha ao revogar.' };
+  }
+}
+
+/**
+ * Reenvia a chave para o cliente (e-mail perdido, SMTP fora do ar na hora da
+ * compra, cobrança de suporte). Reusa a MESMA função do fluxo automático para
+ * o corpo do e-mail e o rastreio em licenses.email_* serem idênticos.
+ */
+export async function adminResendMail(
+  _prev: ActionState | null,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const actor = await requireAdmin();
+    const licenseId = String(formData.get('licenseId') ?? '').trim();
+    if (!licenseId) return { ok: false, message: 'Licença inválida.' };
+
+    // Destino explícito é permitido (cliente pediu outro endereço), mas cai no
+    // e-mail cadastrado quando o campo vem vazio. Valida porque o prompt do
+    // admin aceita texto livre e isso vai direto para o cabeçalho SMTP.
+    const rawTo = String(formData.get('to') ?? '').trim();
+    let to: string | undefined;
+    if (rawTo) {
+      const parsed = emailSchema.safeParse(rawTo);
+      if (!parsed.success) {
+        return { ok: false, message: parsed.error.issues[0]?.message ?? 'E-mail inválido.' };
+      }
+      to = parsed.data;
+    }
+
+    const result = await deliverLicenseEmail(licenseId, { to });
+    if (!result.ok) {
+      return { ok: false, message: `O envio falhou: ${result.error}. A chave não foi entregue.` };
+    }
+
+    await logLicenseEvent({
+      licenseId,
+      action: 'email',
+      detail: `Chave reenviada para ${to ?? 'o e-mail cadastrado'}.`,
+      actor,
+    });
+
+    revalidatePath('/admin/chaves');
+    return { ok: true, message: `Chave reenviada para ${to ?? 'o e-mail cadastrado'}.` };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'Falha ao reenviar.' };
   }
 }
 

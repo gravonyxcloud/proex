@@ -40,13 +40,30 @@ export default async function PagamentosAdmin({
 
   const { data: licRaw } = await supabase
     .from('licenses')
-    .select('id, order_id')
-    .order('issued_at', { ascending: false })
-    .limit(200);
-  const licencas = (licRaw ?? []) as Pick<License, 'id' | 'order_id'>[];
-  const licencaPorPedido = new Map(
-    licencas.filter((l) => l.order_id).map((l) => [l.order_id as string, l.id]),
-  );
+    .select('id, order_id, key_hint, customer_email, status')
+    .order('expires_at', { ascending: false })
+    .limit(500);
+  type LicRow = Pick<License, 'id' | 'key_hint'> & {
+    order_id: string | null;
+    customer_email: string;
+    status: string;
+  };
+  const licencas = (licRaw ?? []) as LicRow[];
+
+  // Renovação não troca licenses.order_id: sem o fallback por e-mail a linha
+  // do pedido renovado aparece como "falhou" mesmo com a chave emitida.
+  const hintPorPedido = new Map<string, string>();
+  const hintPorEmail = new Map<string, string>();
+  for (const l of licencas) {
+    if (l.status === 'revoked') continue;
+    if (l.order_id && !hintPorPedido.has(l.order_id)) hintPorPedido.set(l.order_id, l.key_hint);
+    if (!hintPorEmail.has(l.customer_email)) hintPorEmail.set(l.customer_email, l.key_hint);
+  }
+  const hintDe = (o: Order): string | null =>
+    hintPorPedido.get(o.id) ??
+    (o.status === 'approved' && o.license_issued
+      ? (hintPorEmail.get(o.customer_email) ?? null)
+      : null);
 
   const filtros = [
     { id: 'todos', label: 'Todos' },
@@ -98,6 +115,7 @@ export default async function PagamentosAdmin({
                   <tr key={o.id} className="transition hover:bg-white/[0.02]">
                     <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">
                       {o.external_reference}
+                      <div className="mt-0.5 text-[11px]">MP: {o.mp_payment_id ?? '—'}</div>
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="max-w-[220px] truncate">{o.customer_email}</div>
@@ -119,8 +137,10 @@ export default async function PagamentosAdmin({
                       )}
                     </td>
                     <td className="px-5 py-3.5 text-right">
-                      {licencaPorPedido.has(o.id) ? (
-                        <span className="text-xs text-success">emitida</span>
+                      {hintDe(o) ? (
+                        <span className="font-mono text-xs text-success" title="Chave emitida">
+                          {hintDe(o)}
+                        </span>
                       ) : o.status === 'approved' ? (
                         <span className="text-xs text-danger">falhou</span>
                       ) : (

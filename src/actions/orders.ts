@@ -88,6 +88,8 @@ export async function syncOrder(orderId: string): Promise<ActionState> {
         transaction_amount: payment.transaction_amount,
         installments: payment.installments,
         date_approved: payment.date_approved,
+        fee_details: payment.fee_details,
+        transaction_details: payment.transaction_details,
       },
       actor,
     );

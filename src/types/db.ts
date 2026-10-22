@@ -70,6 +70,11 @@ export interface License {
   revoked_reason: string | null;
   created_at: string;
   updated_at: string;
+  /** Entrega da chave por e-mail. Ver supabase/migrations/*_0003_*.sql */
+  email_sent_at: string | null;
+  email_to: string | null;
+  email_error: string | null;
+  email_attempts: number;
 }
 
 export interface Payment {
@@ -83,6 +88,40 @@ export interface Payment {
   status: string;
   status_detail: string | null;
   paid_at: string | null;
+  /** Taxa congelada no momento da cobrança. Ver supabase/migrations/*_0003_*.sql */
+  fee_brl: number;
+  /** 'mercadopago' = valor real devolvido pela API; 'estimada' = app_settings. */
+  fee_source: 'mercadopago' | 'estimada' | null;
+  /** Coluna gerada (amount_brl - fee_brl). Nunca escrever. */
+  net_brl: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Linha única de configuração da operação (id = true). */
+export interface AppSettings {
+  id: boolean;
+  store_name: string;
+  /** % sobre o bruto cobrado pelo gateway */
+  mp_fee_percent: number;
+  /** R$ fixo por transação */
+  mp_fee_fixed_brl: number;
+  /** % do líquido reservado para imposto — NÃO entra em payments.fee_brl */
+  tax_percent: number;
+  updated_at: string;
+}
+
+export type WithdrawalMethod = 'pix' | 'ted' | 'transferencia' | 'dinheiro' | 'outro';
+
+/** Dinheiro que saiu do caixa. */
+export interface Withdrawal {
+  id: string;
+  amount_brl: number;
+  withdrawn_at: string;
+  method: WithdrawalMethod;
+  destination: string | null;
+  note: string | null;
+  actor: string;
   created_at: string;
   updated_at: string;
 }

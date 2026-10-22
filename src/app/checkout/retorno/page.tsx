@@ -37,6 +37,7 @@ function RetornoInterno() {
   const startedAt = useRef(Date.now());
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopped = useRef(false);
+  const dataRef = useRef<StatusResponse | null>(null);
 
   const check = useCallback(async () => {
     if (stopped.current || !orderId || !email) return;
@@ -54,18 +55,30 @@ function RetornoInterno() {
 
       const json = (await res.json()) as StatusResponse;
       setData(json);
+      dataRef.current = json;
 
-      if (json.status === 'approved') {
+      if (json.license) {
         stopped.current = true;
         if (timer.current) clearInterval(timer.current);
         setMostrandoChave(true);
-        if (json.license) toast.success('Pagamento aprovado. Sua chave está pronta!');
-        else if (json.licenseError) toast.error('Pagamento aprovado, mas a chave falhou.');
+        toast.success('Pagamento aprovado. Sua chave está pronta!');
+      } else if (json.licenseError) {
+        // Aprovado mas a emissão falhou: sem chave para mostrar. Para o
+        // polling e orienta o comprador — spinner infinito só piora.
+        stopped.current = true;
+        if (timer.current) clearInterval(timer.current);
+        setErro('Pagamento aprovado, mas a emissão da chave falhou. Fale com o suporte para reprocessarmos.');
       } else if (json.status === 'rejected' || json.status === 'cancelled') {
         stopped.current = true;
         if (timer.current) clearInterval(timer.current);
         setErro('O pagamento não foi aprovado.');
+      } else if (json.status === 'refunded' || json.status === 'charged_back') {
+        stopped.current = true;
+        if (timer.current) clearInterval(timer.current);
+        setErro('Este pagamento foi estornado.');
       }
+      // approved sem chave e sem erro: a emissão ainda está em andamento
+      // (webhook/provisionamento) — deixa o polling continuar.
     } catch {
       /* tenta de novo */
     }
@@ -81,7 +94,11 @@ function RetornoInterno() {
     timer.current = setInterval(() => {
       if (Date.now() - startedAt.current > TIMEOUT_MS) {
         if (timer.current) clearInterval(timer.current);
-        setErro('Tempo esgotado. O pagamento pode ainda não ter sido confirmado.');
+        setErro(
+          dataRef.current?.status === 'approved'
+            ? 'Pagamento aprovado. A chave ainda está sendo emitida — fale com o suporte se ela não aparecer em alguns minutos.'
+            : 'Tempo esgotado. O pagamento pode ainda não ter sido confirmado.',
+        );
         return;
       }
       void check();
@@ -144,12 +161,6 @@ function RetornoInterno() {
             </div>
           ))}
         </div>
-        {data?.licenseError && (
-          <p className="mt-5 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-foreground">
-            Pagamento recebido. A emissão da chave está demorando — ele vai aparecer no seu painel em
-            instantes.
-          </p>
-        )}
         <Link href="/painel" className="btn-ghost mt-6">
           Ir para o painel
         </Link>
@@ -229,7 +240,7 @@ setx ANTHROPIC_API_KEY "${revelada ? licenca.key : 'sk-px-...'}"`}</pre>
         </div>
 
         <p className="mt-5 text-center text-xs text-muted-foreground">
-          A chave também foi enviada para <span className="text-foreground">{email}</span>.
+          Anote ou copie a chave acima — é ela que você usa para configurar o Claude Code.
         </p>
       </div>
     </div>

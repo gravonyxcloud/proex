@@ -6,6 +6,10 @@ import { processPayment } from '@/lib/mp/handle-payment';
 
 export const dynamic = 'force-dynamic';
 
+/** Cache por mp_payment_id do resultado bruto da API do Mercado Pago. */
+const MP_POLL_TTL_MS = 5_000;
+const mpPollCache = new Map<string, { at: number; payment: Awaited<ReturnType<ReturnType<typeof paymentClient>['get']>> }>();
+
 /**
  * GET /api/checkout/status?orderId=<uuid>&email=<email>
  *
@@ -23,7 +27,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Parâmetros inválidos.' }, { status: 400 });
   }
 
-  const state = await getOrderState(orderId);
+  const state = await getOrderState(orderId, { licencaPorEmail: true });
   if (!state || state.order.customer_email.toLowerCase() !== email) {
     return NextResponse.json({ error: 'Pedido não encontrado.' }, { status: 404 });
   }
@@ -35,7 +39,16 @@ export async function GET(req: NextRequest) {
     const mpId = order.mp_payment_id;
     if (mpId && process.env.MP_ACCESS_TOKEN) {
       try {
-        const payment = await paymentClient().get({ id: mpId });
+        // Cache curto: o /checkout/retorno consulta a cada 2,5s e cada chamada
+        // ao MP conta no rate limit da API deles.
+        const now = Date.now();
+        const hit = mpPollCache.get(mpId);
+        let payment = hit && now - hit.at < MP_POLL_TTL_MS ? hit.payment : null;
+        if (!payment) {
+          payment = await paymentClient().get({ id: mpId });
+          if (mpPollCache.size > 500) mpPollCache.clear();
+          mpPollCache.set(mpId, { at: now, payment });
+        }
         await processPayment(
           {
             id: String(payment.id),
@@ -46,6 +59,8 @@ export async function GET(req: NextRequest) {
             transaction_amount: payment.transaction_amount,
             installments: payment.installments,
             date_approved: payment.date_approved,
+            fee_details: payment.fee_details,
+            transaction_details: payment.transaction_details,
           },
           'poll',
         );
@@ -54,7 +69,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const refreshed = await getOrderState(orderId);
+    const refreshed = await getOrderState(orderId, { licencaPorEmail: true });
     if (refreshed) {
       order = refreshed.order as typeof order;
       state.license = refreshed.license;

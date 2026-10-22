@@ -5,6 +5,7 @@ import { useState, useTransition } from 'react';
 
 import {
   adminActivate,
+  adminResendMail,
   adminRevoke,
   adminRenew,
   adminUnrevoke,
@@ -104,6 +105,26 @@ function LicencaTable({
     router.refresh();
   }
 
+  async function reenviar(l: License) {
+    const destino = window.prompt(
+      `Reenviar a chave ${l.key_hint} por e-mail.\n\nDestino (em branco = ${l.customer_email}):`,
+      '',
+    );
+    // null = cancelou; '' = usa o e-mail cadastrado.
+    if (destino === null) return;
+
+    setBusy(`m-${l.id}`);
+    const fd = new FormData();
+    fd.set('licenseId', l.id);
+    fd.set('to', destino);
+    const res = await adminResendMail(null, fd);
+    setBusy(null);
+
+    if (res.ok) toast.success(res.message);
+    else toast.error(res.message);
+    router.refresh();
+  }
+
   if (licencas.length === 0) {
     return (
       <div className="surface p-8 text-center text-sm text-muted-foreground">
@@ -122,6 +143,7 @@ function LicencaTable({
               <th className="px-4 py-3 font-medium">Cliente</th>
               <th className="px-4 py-3 font-medium">Plano</th>
               <th className="px-4 py-3 font-medium">Vencimento</th>
+              <th className="px-4 py-3 font-medium">E-mail da chave</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-5 py-3 text-right font-medium">Ações</th>
             </tr>
@@ -141,6 +163,19 @@ function LicencaTable({
                 <td className="px-4 py-3.5">{l.plan_slug.replace('cc_', '').replace('d', ' dias')}</td>
                 <td className="px-4 py-3.5 whitespace-nowrap">{l.expires_at.slice(0, 10)}</td>
                 <td className="px-4 py-3.5">
+                  {l.email_error ? (
+                    <div className="text-xs text-danger" title={l.email_error}>
+                      Falhou — {l.email_attempts}x
+                    </div>
+                  ) : l.email_sent_at ? (
+                    <div className="whitespace-nowrap text-xs text-muted-foreground">
+                      {l.email_sent_at.slice(0, 10)}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">não enviado</div>
+                  )}
+                </td>
+                <td className="px-4 py-3.5">
                   <span
                     className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${
                       l.status === 'active'
@@ -154,23 +189,32 @@ function LicencaTable({
                   </span>
                 </td>
                 <td className="px-5 py-3.5 text-right">
-                  {l.status === 'revoked' ? (
+                  <div className="flex justify-end gap-2">
                     <button
-                      onClick={() => reativar(l)}
-                      disabled={busy === l.id}
+                      onClick={() => reenviar(l)}
+                      disabled={busy !== null}
                       className="btn-outline btn-sm"
                     >
-                      Reativar
+                      {busy === `m-${l.id}` ? '…' : 'Reenviar'}
                     </button>
-                  ) : (
-                    <button
-                      onClick={() => revogar(l)}
-                      disabled={busy === l.id}
-                      className="btn-ghost btn-sm hover:border-danger/40 hover:text-danger"
-                    >
-                      {busy === l.id ? '…' : 'Revogar'}
-                    </button>
-                  )}
+                    {l.status === 'revoked' ? (
+                      <button
+                        onClick={() => reativar(l)}
+                        disabled={busy !== null}
+                        className="btn-outline btn-sm"
+                      >
+                        Reativar
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => revogar(l)}
+                        disabled={busy !== null}
+                        className="btn-ghost btn-sm hover:border-danger/40 hover:text-danger"
+                      >
+                        {busy === l.id ? '…' : 'Revogar'}
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

@@ -1,6 +1,15 @@
 import 'server-only';
 
 import { activateLicense, LicenseApiError, renewLicense } from '@/lib/license-api';
+import { deliverLicenseEmail } from '@/lib/mail';
+import {
+  FALLBACK_SETTINGS,
+  hasRealFee,
+  loadSettings,
+  resolveFee,
+  type FeeFacts,
+  type ResolvedFee,
+} from '@/lib/mp/fees';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { Order, OrderStatus } from '@/types/db';
 
@@ -31,7 +40,9 @@ export function expiresFrom(
 const APPROVABLE: OrderStatus[] = ['pending', 'in_process', 'rejected'];
 
 export interface PaymentFacts {
-  id: string;
+  /** ID real do pagamento no MP. Ausente no reprocessamento manual de pedidos
+   *  criados pelo Checkout Pro (onde nem sempre guardamos o id). */
+  id?: string;
   status?: string;
   status_detail?: string;
   external_reference?: string;
@@ -39,12 +50,38 @@ export interface PaymentFacts {
   transaction_amount?: number;
   installments?: number;
   date_approved?: string | null;
+  /** Detalhamento de tarifas do MP (fonte da taxa real). */
+  fee_details?: FeeFacts['fee_details'];
+  transaction_details?: FeeFacts['transaction_details'];
 }
 
 export interface ProcessResult {
   orderId: string | null;
   action: 'no_order' | 'ignored' | 'advanced' | 'already' | 'issued' | 'license_error';
   detail: string;
+}
+
+/**
+ * Congela a taxa do pagamento.
+ *
+ * A taxa só é calculada uma vez, quando a linha de `payments` nasce: o upsert
+ * usa `ignoreDuplicates`, então um webhook repetido não a reescreve. Como o
+ * MP manda `fee_details` em todo `GET /v1/payments`, o caminho normal grava a
+ * taxa REAL; a estimativa por `app_settings` é só o fallback de quem chega sem
+ * esses campos (reprocessamento manual, payload antigo).
+ */
+async function feeFor(facts: PaymentFacts, amountBrl: number): Promise<ResolvedFee> {
+  const feeFacts: FeeFacts = {
+    transaction_amount: facts.transaction_amount,
+    fee_details: facts.fee_details,
+    transaction_details: facts.transaction_details,
+  };
+
+  if (hasRealFee(feeFacts)) {
+    return resolveFee(feeFacts, amountBrl, FALLBACK_SETTINGS);
+  }
+
+  return resolveFee(feeFacts, amountBrl, await loadSettings());
 }
 
 /**
@@ -87,6 +124,7 @@ export async function processPayment(facts: PaymentFacts, actor = 'system'): Pro
 
   // 2. registra o pagamento (one-shot por mp_payment_id)
   if (facts.id) {
+    const fee = await feeFor(facts, order.amount_brl);
     await supabase.from('payments').upsert(
       {
         order_id: order.id,
@@ -98,15 +136,21 @@ export async function processPayment(facts: PaymentFacts, actor = 'system'): Pro
         status: mpStatus,
         status_detail: facts.status_detail ?? null,
         paid_at: facts.date_approved ?? null,
+        fee_brl: fee.feeBrl,
+        fee_source: fee.source,
       },
       { onConflict: 'mp_payment_id', ignoreDuplicates: true },
     );
   }
 
-  // 3. espelha o status do MP na ordem
+  // 3. espelha o status do MP na ordem. O id só quando veio de um pagamento
+  //    real: o reprocessamento manual não tem id e não pode gravar um sintético.
   await supabase
     .from('orders')
-    .update({ mp_payment_id: String(facts.id), mp_payment_status: mpStatus })
+    .update({
+      ...(facts.id ? { mp_payment_id: facts.id } : {}),
+      mp_payment_status: mpStatus,
+    })
     .eq('id', order.id);
 
   // 4. aprovação — apenas na primeira vez
@@ -118,10 +162,26 @@ export async function processPayment(facts: PaymentFacts, actor = 'system'): Pro
       .in('status', APPROVABLE)
       .select('id');
 
-    order.status = 'approved';
-    if (advanced && advanced.length > 0) {
-      // transição nova
+    if (!advanced || advanced.length === 0) {
+      // Nenhuma linha avançou: ou o pedido JÁ estava aprovado (reprocessamento,
+      // legítimo) ou está em um estado que não pode avançar (refunded/cancelled).
+      // Sem esta checagem um `approved` atrasado emitiria chave em pedido estornado.
+      const { data: fresh } = await supabase
+        .from('orders')
+        .select('status')
+        .eq('id', order.id)
+        .single();
+
+      if (fresh?.status !== 'approved') {
+        return {
+          orderId: order.id,
+          action: 'ignored',
+          detail: `Pagamento aprovado, mas o pedido está ${fresh?.status ?? 'desconhecido'}; nenhuma chave emitida.`,
+        };
+      }
     }
+
+    order.status = 'approved';
   } else if (mpStatus === 'rejected' || mpStatus === 'cancelled') {
     await supabase
       .from('orders')
@@ -221,7 +281,25 @@ export async function processPayment(facts: PaymentFacts, actor = 'system'): Pro
         actor,
       });
 
-      return { orderId: order.id, action: 'issued', detail: `Chave renovada: ${keyHint(key)}.` };
+      // A renovação NÃO refaz o e-mail antigo: o cliente precisa saber que o
+      // prazo novo entrou. O envio é best-effort — a licença já está valendo.
+      const mail = await deliverLicenseEmail(priorLicense.id, { renewal: true });
+      if (!mail.ok) {
+        await logLicenseEvent({
+          licenseId: priorLicense.id,
+          orderId: order.id,
+          action: 'failed',
+          detail: `Licença renovada, mas o e-mail não saiu: ${mail.error}`,
+          actor,
+        });
+      }
+
+      return {
+        orderId: order.id,
+        action: 'issued',
+        detail:
+          `Chave renovada: ${keyHint(key)}.` + (mail.ok ? '' : ` E-mail falhou: ${mail.error}`),
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Falha ao renovar a licença.';
 
@@ -291,6 +369,32 @@ export async function processPayment(facts: PaymentFacts, actor = 'system'): Pro
       actor,
     });
 
+    // Entrega a chave por e-mail. Best-effort de propósito: o pagamento foi
+    // aprovado e a licença já vale. Se o SMTP cair, a chave continua no painel
+    // e o erro fica gravado em licenses.email_error para reenvio no admin.
+    const { data: created } = await supabase
+      .from('licenses')
+      .select('id')
+      .eq('order_id', order.id)
+      .maybeSingle();
+
+    if (created?.id) {
+      const mail = await deliverLicenseEmail(created.id);
+      if (!mail.ok) {
+        await logLicenseEvent({
+          orderId: order.id,
+          action: 'failed',
+          detail: `Licença emitida, mas o e-mail não saiu: ${mail.error}`,
+          actor,
+        });
+        return {
+          orderId: order.id,
+          action: 'issued',
+          detail: `Chave emitida. E-mail falhou: ${mail.error}`,
+        };
+      }
+    }
+
     return { orderId: order.id, action: 'issued', detail: 'Chave emitida.' };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Falha ao ativar a licença.';
@@ -307,7 +411,7 @@ export async function processPayment(facts: PaymentFacts, actor = 'system'): Pro
 export async function logLicenseEvent(input: {
   licenseId?: string | null;
   orderId?: string | null;
-  action: 'activate' | 'renew' | 'revoke' | 'reprocess' | 'failed';
+  action: 'activate' | 'renew' | 'revoke' | 'reprocess' | 'failed' | 'email';
   detail?: string | null;
   actor?: string;
 }) {
