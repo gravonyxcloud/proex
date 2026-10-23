@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { adminReplySupportTicket, adminUpdateTicketStatus } from '@/actions/admin-support';
+import { AdminReplyForm, AdminStatusForm } from '@/components/admin/ticket-forms';
 import { createClient } from '@/lib/supabase/server';
 import type { SupportMessage, SupportTicket } from '@/types/db';
 
@@ -114,50 +114,16 @@ export default async function AdminTicketDetailPage({ params }: { params: { id: 
           <section className="surface p-6">
             <h2 className="text-sm font-semibold">Responder ao cliente</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Ao responder sem marcar "nota interna", o status vira "Aguardando cliente".
+              Ao responder sem marcar &quot;nota interna&quot;, o status vira &quot;Aguardando cliente&quot;.
             </p>
-            <form action={adminReplySupportTicket} className="mt-4 space-y-4">
-              <input type="hidden" name="ticketId" value={t.id} />
-              <textarea name="message" className="input min-h-[120px] resize-y" placeholder="Escreva a resposta..." required />
-              <div className="flex flex-wrap items-center gap-3">
-                <select name="status" className="input w-auto">
-                  <option value="">Deixar automático</option>
-                  <option value="in_progress">Em atendimento</option>
-                  <option value="waiting_customer">Aguardando cliente</option>
-                  <option value="resolved">Resolvido</option>
-                  <option value="closed">Fechado</option>
-                </select>
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <input type="checkbox" name="internal" />
-                  Nota interna (não envia para cliente)
-                </label>
-                <button className="btn-primary">Enviar</button>
-              </div>
-            </form>
+            <AdminReplyForm ticketId={t.id} />
           </section>
         </div>
 
         <aside className="space-y-6">
           <section className="surface p-6">
             <h2 className="text-sm font-semibold">Gerenciar ticket</h2>
-            <form action={adminUpdateTicketStatus} className="mt-4 space-y-3">
-              <input type="hidden" name="ticketId" value={t.id} />
-              <div>
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">Status</label>
-                <select name="status" defaultValue={t.status} className="input">
-                  <option value="open">Aberto</option>
-                  <option value="in_progress">Em atendimento</option>
-                  <option value="waiting_customer">Aguardando cliente</option>
-                  <option value="resolved">Resolvido</option>
-                  <option value="closed">Fechado</option>
-                </select>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">Prioridade (0-10)</label>
-                <input name="priority" type="number" min={0} max={10} defaultValue={t.priority} className="input" />
-              </div>
-              <button className="btn-ghost w-full">Atualizar</button>
-            </form>
+            <AdminStatusForm ticketId={t.id} status={t.status} priority={t.priority} />
           </section>
 
           {Array.isArray(t.context_snapshot) && t.context_snapshot.length > 0 && (

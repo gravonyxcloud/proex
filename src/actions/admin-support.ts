@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { runSupportAi } from '@/lib/ai/process-support';
+import type { ActionState } from '@/actions/plans';
 
 async function requireAdmin() {
   const supabase = createClient();
@@ -17,7 +18,10 @@ async function requireAdmin() {
   return user;
 }
 
-export async function adminReplySupportTicket(formData: FormData) {
+export async function adminReplySupportTicket(
+  _prev: ActionState | null,
+  formData: FormData,
+): Promise<ActionState> {
   try {
     await requireAdmin();
     const admin = createAdminClient();
@@ -68,7 +72,10 @@ export async function adminReplySupportTicket(formData: FormData) {
   }
 }
 
-export async function adminUpdateTicketStatus(formData: FormData) {
+export async function adminUpdateTicketStatus(
+  _prev: ActionState | null,
+  formData: FormData,
+): Promise<ActionState> {
   try {
     await requireAdmin();
     const admin = createAdminClient();

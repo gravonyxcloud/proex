@@ -1,10 +1,12 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useFormState, useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 
 import { createSupportTicket } from '@/actions/support';
 import { useToast } from '@/components/ui/toaster';
+import { useSupportAttachments } from './use-support-attachments';
 import type { ActionState } from '@/actions/plans';
 
 const CATEGORIAS = [
@@ -17,50 +19,44 @@ const CATEGORIAS = [
   { value: 'outro', label: 'Outro' },
 ] as const;
 
-const initial: ActionState = { ok: false, message: '' };
+const initial: (ActionState & { ticketId?: string }) | null = null;
+
+function Submit({ busy }: { busy: boolean }) {
+  const { pending } = useFormStatus();
+  const disabled = pending || busy;
+  return (
+    <button type="submit" className="btn-primary" disabled={disabled}>
+      {disabled ? 'Abrindo ticket...' : 'Abrir ticket'}
+    </button>
+  );
+}
 
 export function SupportForm() {
   const router = useRouter();
   const toast = useToast();
   const formRef = useRef<HTMLFormElement>(null);
-  const [state, formAction, pending] = useActionState(createSupportTicket, initial);
-  const [files, setFiles] = useState<File[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [state, formAction] = useFormState(createSupportTicket, initial);
+  const { uploads, pending, onFiles, removeUpload, reset, serialize } = useSupportAttachments();
 
   useEffect(() => {
+    if (!state) return;
     if (state.ok) {
       toast.success(state.message);
       formRef.current?.reset();
-      setFiles([]);
-      if ((state as any).ticketId) {
-        router.push(`/painel/suporte/${(state as any).ticketId}`);
+      reset();
+      if (state.ticketId) {
+        router.push(`/painel/suporte/${state.ticketId}`);
       } else {
         router.refresh();
       }
     } else if (state.message) {
       toast.error(state.message);
     }
-  }, [state, router, toast]);
-
-  async function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    const list = Array.from(e.target.files ?? []);
-    const valid = list.filter((f) => {
-      if (f.size > 10 * 1024 * 1024) {
-        toast.error(`${f.name}: maior que 10MB`);
-        return false;
-      }
-      return true;
-    });
-    setFiles((prev) => [...prev, ...valid].slice(0, 5)); // limitar a 5 prints
-    e.target.value = '';
-  }
-
-  function removeFile(i: number) {
-    setFiles((prev) => prev.filter((_, idx) => idx !== i));
-  }
+  }, [state, router, toast, reset]);
 
   return (
     <form ref={formRef} action={formAction} className="surface p-6">
+      <input type="hidden" name="attachments" value={serialize()} />
       <h2 className="text-sm font-semibold">Abrir novo ticket</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         Somente para clientes. Descreva o problema com clareza. Se precisar, envie prints (imagens/PDF/TXT).
@@ -105,28 +101,41 @@ export function SupportForm() {
         <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
           Prints / anexos (opcional)
         </label>
-        <input type="file" accept="image/*,.pdf,.txt" multiple onChange={onFiles} className="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary hover:file:bg-primary/20" />
-        {files.length > 0 && (
+        <input
+          type="file"
+          accept="image/*,.pdf,.txt"
+          multiple
+          onChange={onFiles}
+          disabled={uploads.length >= 5}
+          className="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary hover:file:bg-primary/20"
+        />
+        {uploads.length > 0 && (
           <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-            {files.map((f, i) => (
-              <li key={i} className="flex items-center justify-between rounded-lg border border-border px-2 py-1">
+            {uploads.map((u, i) => (
+              <li key={u.attachment.path} className="flex items-center justify-between rounded-lg border border-border px-2 py-1">
                 <span className="truncate">
-                  {f.name} <span className="opacity-60">({Math.round(f.size / 1024)}KB)</span>
+                  {u.name} <span className="opacity-60">({Math.round(u.size / 1024)}KB) · enviado</span>
                 </span>
-                <button type="button" onClick={() => removeFile(i)} className="text-red-400 hover:underline">
+                <button type="button" onClick={() => removeUpload(i)} className="text-red-400 hover:underline">
                   remover
                 </button>
               </li>
             ))}
           </ul>
         )}
+        {pending > 0 && (
+          <p className="mt-2 text-xs text-amber-400">
+            Enviando {pending} arquivo{pending > 1 ? 's' : ''}...
+          </p>
+        )}
         <p className="mt-1 text-xs text-muted-foreground">Até 5 arquivos, máx 10MB cada. Você pode enviar prints direto.</p>
       </div>
 
       <div className="mt-6 flex items-center gap-3">
-        <button className="btn-primary" disabled={pending || uploading}>
-          {pending || uploading ? 'Abrindo ticket...' : 'Abrir ticket'}
-        </button>
+        <Submit busy={pending > 0} />
+        {pending > 0 && (
+          <span className="text-xs text-muted-foreground">Aguarde o upload terminar antes de abrir o ticket.</span>
+        )}
       </div>
     </form>
   );

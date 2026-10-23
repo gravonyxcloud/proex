@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 
 import { SupportReplyForm } from '@/components/panel/support-reply-form';
 import { createClient } from '@/lib/supabase/server';
-import type { SupportMessage, SupportTicket } from '@/types/db';
+import { getSignedSupportAttachments } from '@/lib/support-attachments';
+import type { SupportAttachment, SupportMessage, SupportTicket } from '@/types/db';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Ticket' };
@@ -75,6 +76,15 @@ export default async function TicketDetailPage({ params }: { params: { id: strin
   const t = ticket as SupportTicket;
   const msgs = (messages ?? []) as SupportMessage[];
 
+  // O bucket é privado: resolve signed URL (1h) por mensagem a cada render.
+  const msgAttachments = await Promise.all(
+    msgs.map((m) =>
+      Array.isArray(m.attachments) && m.attachments.length > 0
+        ? getSignedSupportAttachments(m.attachments)
+        : Promise.resolve([] as SupportAttachment[]),
+    ),
+  );
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -120,7 +130,7 @@ export default async function TicketDetailPage({ params }: { params: { id: strin
           {msgs.length === 0 ? (
             <p className="px-6 py-6 text-sm text-muted-foreground">Nenhuma mensagem ainda.</p>
           ) : (
-            msgs.map((m) => (
+            msgs.map((m, mi) => (
               <article
                 key={m.id}
                 className={`px-6 py-5 ${m.sender_type === 'agent' ? 'bg-primary/5' : ''}`}
@@ -139,11 +149,25 @@ export default async function TicketDetailPage({ params }: { params: { id: strin
                   </time>
                 </div>
                 <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">{m.message}</div>
-                {Array.isArray(m.attachments) && m.attachments.length > 0 && (
-                  <ul className="mt-4 space-y-1 text-xs text-muted-foreground">
-                    {m.attachments.map((a: any, i: number) => (
-                      <li key={i}>
-                        <span className="rounded-lg border border-border px-2 py-1">{a.name}</span>
+                {msgAttachments[mi]?.length > 0 && (
+                  <ul className="mt-4 flex flex-wrap gap-2 text-xs">
+                    {msgAttachments[mi].map((a, i) => (
+                      <li key={a.path || i}>
+                        {a.url ? (
+                          <a
+                            href={a.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-primary hover:bg-primary/10"
+                          >
+                            {a.type.startsWith('image/') ? '🖼' : a.type === 'application/pdf' ? '📄' : '📎'}
+                            <span className="max-w-[24ch] truncate">{a.name}</span>
+                          </a>
+                        ) : (
+                          <span className="rounded-lg border border-border px-2 py-1 text-muted-foreground">
+                            {a.name}
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>

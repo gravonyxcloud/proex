@@ -5,8 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { supportTicketCreateSchema, supportTicketReplySchema } from '@/lib/schemas';
+import { parseSupportAttachments } from '@/lib/support-attachments';
 import type { ActionState } from '@/actions/plans';
-import type { SupportAttachment, SupportTicketContextItem } from '@/types/db';
+import type { SupportTicketContextItem } from '@/types/db';
 import { runSupportAi } from '@/lib/ai/process-support';
 
 async function requireCustomer() {
@@ -48,6 +49,9 @@ export async function createSupportTicket(
     });
 
     if (!parsed.success) return { ok: false, message: parsed.error.errors[0].message };
+
+    const att = parseSupportAttachments(formData.get('attachments'), { userId: user.id });
+    if (!att.ok) return { ok: false, message: att.message };
 
     const supabase = createClient();
     const admin = createAdminClient();
@@ -106,7 +110,7 @@ export async function createSupportTicket(
       sender_type: 'customer',
       sender_id: user.id,
       message: parsed.data.message,
-      attachments: [],
+      attachments: att.attachments,
       internal_note: false,
     });
 
@@ -147,13 +151,19 @@ export async function replySupportTicket(
     if (!ticket) return { ok: false, message: 'Ticket não encontrado.' };
     if (ticket.status === 'closed') return { ok: false, message: 'Este ticket está fechado.' };
 
+    const att = parseSupportAttachments(formData.get('attachments'), {
+      userId: user.id,
+      ticketId: parsed.data.ticketId,
+    });
+    if (!att.ok) return { ok: false, message: att.message };
+
     const now = new Date().toISOString();
     const { error: mErr } = await admin.from('support_messages').insert({
       ticket_id: parsed.data.ticketId,
       sender_type: 'customer',
       sender_id: user.id,
       message: parsed.data.message,
-      attachments: [],
+      attachments: att.attachments,
       internal_note: false,
     });
 

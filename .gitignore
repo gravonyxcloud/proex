@@ -18,3 +18,6 @@ npm-debug.log*
 .taste-skill/
 .claude/skills/
 .claude/tmp_*
+
+# midia de marketing (render local, nao vai pro repo)
+video/
