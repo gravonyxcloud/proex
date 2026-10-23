@@ -116,3 +116,24 @@ export const licenseActionSchema = z.discriminatedUnion('action', [
   }),
 ]);
 
+export const supportCategorySchema = z.enum([
+  'chave_nao_chegou',
+  'nao_autentica',
+  'rate_limit',
+  'renovacao',
+  'reembolso',
+  'configuracao',
+  'outro',
+]);
+
+export const supportTicketCreateSchema = z.object({
+  subject: z.string().trim().min(5, 'Assunto muito curto.').max(120),
+  category: supportCategorySchema,
+  message: z.string().trim().min(15, 'Descreva com mais detalhes (mínimo 15 caracteres).').max(8000),
+});
+
+export const supportTicketReplySchema = z.object({
+  ticketId: z.string().uuid(),
+  message: z.string().trim().min(1, 'Escreva uma mensagem.').max(8000),
+});
+

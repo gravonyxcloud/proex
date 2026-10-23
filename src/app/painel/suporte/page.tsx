@@ -2,10 +2,44 @@ import Link from 'next/link';
 
 import { SupportForm } from '@/components/panel/support-form';
 import { createClient } from '@/lib/supabase/server';
-import type { License, Order } from '@/types/db';
+import type { SupportTicket } from '@/types/db';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Suporte' };
+
+function statusLabel(s: string) {
+  switch (s) {
+    case 'open':
+      return 'Aberto';
+    case 'in_progress':
+      return 'Em atendimento';
+    case 'waiting_customer':
+      return 'Aguardando sua resposta';
+    case 'resolved':
+      return 'Resolvido';
+    case 'closed':
+      return 'Fechado';
+    default:
+      return s;
+  }
+}
+
+function statusClass(s: string) {
+  switch (s) {
+    case 'open':
+      return 'bg-blue-500/10 text-blue-400 border-blue-500/30';
+    case 'in_progress':
+      return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
+    case 'waiting_customer':
+      return 'bg-purple-500/10 text-purple-400 border-purple-500/30';
+    case 'resolved':
+      return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
+    case 'closed':
+      return 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30';
+    default:
+      return 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30';
+  }
+}
 
 export default async function SuportePainelPage() {
   const supabase = createClient();
@@ -14,85 +48,56 @@ export default async function SuportePainelPage() {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const [licRes, ordRes] = await Promise.all([
-    supabase
-      .from('licenses')
-      .select('id, plan_slug, status, key_hint, expires_at, issued_at')
-      .eq('customer_id', user.id)
-      .order('issued_at', { ascending: false })
-      .limit(5),
-    supabase
-      .from('orders')
-      .select('id, external_reference, plan_slug, amount_brl, status, created_at')
-      .eq('customer_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(5),
-  ]);
-
-  const licencas = (licRes.data ?? []) as Pick<
-    License,
-    'id' | 'plan_slug' | 'status' | 'key_hint' | 'expires_at' | 'issued_at'
-  >[];
-  const ordens = (ordRes.data ?? []) as Pick<
-    Order,
-    'id' | 'external_reference' | 'plan_slug' | 'amount_brl' | 'status' | 'created_at'
-  >[];
-
-  const contexto = [
-    ...licencas.map((l) => `chave ${l.key_hint} · ${l.plan_slug} · ${l.status}`),
-    ...ordens.map((o) => `pedido ${o.external_reference} · ${o.plan_slug} · ${o.status}`),
-  ].join('\n');
+  const { data: tickets } = await supabase
+    .from('support_tickets')
+    .select('*')
+    .eq('customer_id', user.id)
+    .order('last_message_at', { ascending: false });
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-4xl space-y-6">
       <header>
-        <p className="text-sm text-muted-foreground">Atendimento</p>
-        <h1 className="mt-1 text-3xl font-bold">Suporte</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          Chave que não chega ou não autentica é problema nosso. Descreva o que aconteceu — já
-          anexamos o contexto da sua conta para o atendimento não precisar perguntar de novo.
+        <h1 className="text-xl font-semibold">Suporte</h1>
+        <p className="text-sm text-muted-foreground">
+          Somente para clientes. Abra um ticket e eu analiso com calma e respondo o mais humano possível.
         </p>
       </header>
 
-      <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
-        <SupportForm contexto={contexto} email={user.email ?? ''} />
+      <SupportForm />
 
-        <div className="space-y-5">
-          <div className="surface p-5">
-            <h2 className="text-sm font-semibold">Diagnóstico rápido</h2>
-            <ul className="mt-3.5 space-y-3 text-sm leading-relaxed text-muted-foreground">
-              <li>
-                <strong className="text-foreground">Não autentica.</strong> Confirme que{' '}
-                <code className="text-primary">ANTHROPIC_BASE_URL</code> aponta para{' '}
-                <code className="text-primary">https://api.gravonyx.com</code> e que você abriu um
-                terminal novo depois do <code className="text-primary">setx</code>.
-              </li>
-              <li>
-                <strong className="text-foreground">Rate limit.</strong> É o uso justo de 80M
-                tokens/hora agindo; a janela desliza sozinha em 60 minutos.
-              </li>
-              <li>
-                <strong className="text-foreground">Chave expirada.</strong> Veja o vencimento no{' '}
-                <Link href="/painel" className="text-primary hover:underline">
-                  início do painel
-                </Link>{' '}
-                e renove mantendo a mesma chave.
-              </li>
-            </ul>
-          </div>
-
-          <div id="reembolso" className="surface scroll-mt-24 p-5">
-            <h2 className="text-sm font-semibold">Pedido de reembolso</h2>
-            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-              7 dias corridos da compra, 100% do valor no mesmo método, em até 5 dias úteis.
-              Descreva o motivo no formulário ao lado marcando a opção de reembolso.
-            </p>
-            <Link href="/suporte#reembolso" className="btn-outline mt-4 w-full text-xs">
-              Ler a política completa
-            </Link>
-          </div>
+      <section className="surface">
+        <div className="border-b border-border px-6 py-4">
+          <h2 className="text-sm font-semibold">Meus tickets</h2>
+          <p className="mt-1 text-xs text-muted-foreground">Histórico e acompanhamento das conversas.</p>
         </div>
-      </div>
+        <div className="divide-y divide-border">
+          {(tickets ?? []).length === 0 ? (
+            <p className="px-6 py-6 text-sm text-muted-foreground">Nenhum ticket ainda.</p>
+          ) : (
+            (tickets as SupportTicket[]).map((t) => (
+              <Link
+                key={t.id}
+                href={`/painel/suporte/${t.id}`}
+                className="flex flex-col gap-2 px-6 py-4 transition hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{t.ticket_number}</span>
+                    <span className={`rounded-full border px-2 py-0.5 text-xs ${statusClass(t.status)}`}>
+                      {statusLabel(t.status)}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-sm">{t.subject}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Última mensagem: {new Date(t.last_message_at).toLocaleString('pt-BR')}
+                  </p>
+                </div>
+                <span className="text-xs text-muted-foreground">Ver conversa →</span>
+              </Link>
+            ))
+          )}
+        </div>
+      </section>
     </div>
   );
 }

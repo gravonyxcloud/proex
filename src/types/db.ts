@@ -77,6 +77,76 @@ export interface License {
   email_attempts: number;
 }
 
+export type SupportTicketStatus =
+  | 'open'
+  | 'in_progress'
+  | 'waiting_customer'
+  | 'resolved'
+  | 'closed';
+
+export type SupportTicketCategory =
+  | 'chave_nao_chegou'
+  | 'nao_autentica'
+  | 'rate_limit'
+  | 'renovacao'
+  | 'reembolso'
+  | 'configuracao'
+  | 'outro';
+
+export type SupportSenderType = 'customer' | 'agent' | 'system';
+
+export interface SupportTicketContextItem {
+  type: 'license' | 'order';
+  id: string;
+  label: string;
+  detail?: string;
+}
+
+export interface SupportAttachment {
+  bucket: string;
+  path: string;
+  name: string;
+  size: number;
+  type: string;
+  url?: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  ticket_number: string;
+  customer_id: string | null;
+  customer_email: string;
+  subject: string;
+  category: SupportTicketCategory;
+  status: SupportTicketStatus;
+  priority: number;
+  assigned_to: string | null;
+  context_snapshot: SupportTicketContextItem[];
+  last_message_at: string;
+  last_customer_at: string | null;
+  last_agent_at: string | null;
+  created_at: string;
+  updated_at: string;
+  ai_enabled: boolean;
+  ai_running: boolean;
+  ai_handoff_at: string | null;
+  ai_handoff_reason: string | null;
+  ai_last_reply_at: string | null;
+}
+
+export interface SupportMessage {
+  id: string;
+  ticket_id: string;
+  sender_type: SupportSenderType;
+  sender_id: string | null;
+  message: string;
+  attachments: SupportAttachment[];
+  internal_note: boolean;
+  created_at: string;
+  ai_generated?: boolean;
+  ai_model?: string | null;
+}
+
 export interface Payment {
   id: string;
   order_id: string;
