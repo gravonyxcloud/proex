@@ -63,79 +63,30 @@ export default function StatusClient() {
     let mounted = true;
 
     async function checkStatus() {
-      const gateway = 'https://api.gravonyx.com';
-      const aiBase = 'https://api.anthropic.com';
-
-      async function timed(url: string, init?: RequestInit) {
-        const started = Date.now();
-        try {
-          const res = await fetch(url, { ...init, cache: 'no-store' });
-          const ms = Date.now() - started;
-          const text = await res.text();
-          return {
-            ok: res.ok,
-            status: res.status,
-            ms,
-            detail: text.slice(0, 200).replace(/\s+/g, ' '),
-          };
-        } catch (e: any) {
-          return {
-            ok: false,
-            status: 0,
-            ms: Date.now() - started,
-            detail: e?.message ?? 'Falha de rede.',
-          };
-        }
+      try {
+        const res = await fetch('/api/status/bridge', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!mounted) return;
+        setChecks(data.checks);
+        setModelChecks(data.modelChecks);
+        setAllOk(data.allOk);
+      } catch (err) {
+        if (!mounted) return;
+        setChecks([
+          { ok: false, label: 'Ponte de licenças', detail: 'Erro ao verificar', latencyMs: 0 },
+          { ok: false, label: 'API de chaves', detail: 'Erro ao verificar', latencyMs: 0 },
+        ]);
+        setModelChecks(MODEL_LABELS.map((m) => ({
+          model: m.id,
+          label: m.label,
+          ok: false,
+          detail: 'Erro ao verificar',
+        })));
+        setAllOk(false);
+      } finally {
+        if (mounted) setLoading(false);
       }
-
-      const gatewayUp = (r: Awaited<ReturnType<typeof timed>>) => r.status > 0 && r.status < 500;
-
-      const [core, licenses, models] = await Promise.all([
-        timed(`${gateway}/v1/models`, {
-          headers: { authorization: 'Bearer sk-probe' },
-        }),
-        timed(`${gateway}/v1/models`, {
-          headers: { authorization: 'Bearer sk-probe' },
-        }),
-        timed(`${aiBase}/v1/models`, {
-          headers: { 'x-api-key': process.env.NEXT_PUBLIC_AI_SUPPORT_API_KEY ?? '', 'anthropic-version': '2023-06-01' },
-        }),
-      ]);
-
-      if (!mounted) return;
-
-      const newChecks: Check[] = [
-        {
-          ok: gatewayUp(core),
-          label: 'Ponte de licenças',
-          detail: gatewayUp(core)
-            ? 'No ar — responde pedindo credencial, como deve.'
-            : `Indisponível (HTTP ${core.status || 'sem resposta'}).`,
-          latencyMs: core.ms,
-        },
-        {
-          ok: gatewayUp(licenses),
-          label: 'API de chaves',
-          detail: gatewayUp(licenses)
-            ? 'No ar — emissão de chaves operacional.'
-            : `Indisponível (HTTP ${licenses.status || 'sem resposta'}).`,
-          latencyMs: licenses.ms,
-        },
-      ];
-
-      const newModelChecks: ModelCheck[] = MODEL_LABELS.map((m) => ({
-        model: m.id,
-        label: m.label,
-        ok: gatewayUp(models),
-        detail: gatewayUp(models) ? 'Disponível agora.' : `Indisponível (HTTP ${models.status || 'sem resposta'}).`,
-      }));
-
-      const newAllOk = newChecks.every((c) => c.ok) && newModelChecks.every((m) => m.ok);
-
-      setChecks(newChecks);
-      setModelChecks(newModelChecks);
-      setAllOk(newAllOk);
-      setLoading(false);
     }
 
     checkStatus();
