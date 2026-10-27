@@ -1,8 +1,11 @@
 import Link from 'next/link';
+import { useActionState } from 'react';
 
 import { formatBRL } from '@/lib/money';
 import { formatDate } from '@/lib/date';
 import { createClient } from '@/lib/supabase/server';
+import { requestRefund } from '@/actions/orders';
+import type { ActionState } from '@/actions/plans';
 import type { Order, Payment } from '@/types/db';
 
 export const dynamic = 'force-dynamic';
@@ -23,6 +26,41 @@ function badge(status: string) {
     return 'border-danger/40 bg-danger/15 text-danger';
   if (status === 'refunded') return 'border-border bg-muted text-muted-foreground';
   return 'border-primary/40 bg-primary/10 text-primary';
+}
+
+function canRefund(order: Order): boolean {
+  if (order.status !== 'approved') return false;
+  const paidAt = order.paid_at ? new Date(order.paid_at) : new Date(order.created_at);
+  const now = new Date();
+  const diffDays = (now.getTime() - paidAt.getTime()) / (1000 * 60 * 60 * 24);
+  return diffDays <= 7;
+}
+
+function RefundButton({ orderId }: { orderId: string }) {
+  const [state, formAction] = useActionState(
+    async (_prevState: ActionState, formData: FormData) => {
+      return requestRefund(orderId);
+    },
+    { ok: false, message: '' }
+  );
+  const loading = state.message === 'Processando...';
+
+  return (
+    <form action={formAction}>
+      <button
+        type="submit"
+        disabled={loading}
+        className="btn-outline text-xs px-3 py-1.5 text-danger border-danger/40 hover:bg-danger/10 disabled:opacity-50"
+      >
+        {loading ? 'Processando...' : 'Pedir reembolso'}
+      </button>
+      {state.message && (
+        <span className={`text-xs ${state.ok ? 'text-success' : 'text-danger'}`}>
+          {state.message}
+        </span>
+      )}
+    </form>
+  );
 }
 
 export default async function PagamentosPage() {
@@ -89,6 +127,7 @@ export default async function PagamentosPage() {
                   <th className="px-4 py-3 text-right font-medium">Valor</th>
                   <th className="px-4 py-3 text-right font-medium">Status</th>
                   <th className="px-4 py-3 text-right font-medium">Chave</th>
+                  <th className="px-4 py-3 text-right font-medium">Reembolso</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -117,6 +156,9 @@ export default async function PagamentosPage() {
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      {canRefund(o) ? <RefundButton orderId={o.id} /> : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
                   </tr>
                 ))}

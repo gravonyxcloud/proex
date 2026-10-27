@@ -3,11 +3,13 @@ import Link from 'next/link';
 import { KeyCard } from '@/components/panel/key-card';
 import { UsageMeter } from '@/components/panel/usage-meter';
 import { UsageUnavailable } from '@/components/panel/usage-unavailable';
+import { RenewalForm } from '@/components/panel/renewal-form';
 import { fetchUsage } from '@/lib/usage';
+import { getActivePlans } from '@/lib/plans';
 import { formatBRL } from '@/lib/money';
 import { formatDate } from '@/lib/date';
 import { createClient } from '@/lib/supabase/server';
-import type { License, Order } from '@/types/db';
+import type { License, Order, Plan } from '@/types/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +59,9 @@ export default async function PainelPage() {
     (o) => o.status === 'pending' || o.status === 'in_process',
   );
 
+  // Busca planos ativos para o formulário de renovação
+  const planos = await getActivePlans();
+
   return (
     <div className="space-y-8">
       <header>
@@ -81,14 +86,30 @@ export default async function PainelPage() {
       )}
 
       {ativa ? (
-        <KeyCard
-          licenseKey={ativa.key}
-          keyHint={ativa.key_hint}
-          status={ativa.status}
-          expiresAt={ativa.expires_at}
-          issuedAt={ativa.issued_at}
-          planSlug={ativa.plan_slug}
-        />
+        <>
+          <KeyCard
+            licenseKey={ativa.key}
+            keyHint={ativa.key_hint}
+            status={ativa.status}
+            expiresAt={ativa.expires_at}
+            issuedAt={ativa.issued_at}
+            planSlug={ativa.plan_slug}
+          />
+          <section aria-label="Renovação">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Renovar acesso</h2>
+              <Link href="/precos" className="text-xs text-primary hover:underline">
+                ver todos os planos →
+              </Link>
+            </div>
+            <RenewalForm
+              planos={planos}
+              licenseKey={ativa.key}
+              licenseHint={ativa.key_hint}
+              currentPlanSlug={ativa.plan_slug}
+            />
+          </section>
+        </>
       ) : (
         <div className="surface grid place-items-center gap-5 p-10 text-center">
           <div className="grid h-12 w-12 place-items-center rounded-full border border-border bg-muted text-xl text-muted-foreground">

@@ -4,7 +4,6 @@ import { revalidatePath } from 'next/cache';
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
-import { runSupportAi } from '@/lib/ai/process-support';
 import type { ActionState } from '@/actions/plans';
 
 async function requireAdmin() {
@@ -57,15 +56,16 @@ export async function adminReplySupportTicket(
     if (!internal && !updates.status) updates.status = 'waiting_customer';
     if (internal && !status) updates.status = 'in_progress';
 
+    // Atendente humano assumiu: a IA sai do caminho. Sem isso ela responderia
+    // por cima da resposta que acabamos de escrever.
+    if (!internal) updates.ai_enabled = false;
+
     await admin.from('support_tickets').update(updates).eq('id', ticketId);
 
     revalidatePath('/admin/suporte');
     revalidatePath(`/admin/suporte/${ticketId}`);
     revalidatePath('/painel/suporte');
     revalidatePath(`/painel/suporte/${ticketId}`);
-    if (!internal) {
-      await runSupportAi(ticketId);
-    }
     return { ok: true, message: internal ? 'Nota interna adicionada.' : 'Resposta enviada ao cliente.' };
   } catch (e: any) {
     return { ok: false, message: e?.message ?? 'Erro inesperado.' };
@@ -87,7 +87,12 @@ export async function adminUpdateTicketStatus(
 
     const updates: any = { status };
     if (priority !== null && !Number.isNaN(priority)) updates.priority = priority;
-    if (status === 'in_progress') updates.assigned_to = 'agent';
+
+    if (status === 'in_progress') {
+      // Atendimento humano assumiu: pausa a IA para ela não responder por cima.
+      updates.assigned_to = 'agent';
+      updates.ai_enabled = false;
+    }
 
     await admin.from('support_tickets').update(updates).eq('id', ticketId);
 
@@ -95,9 +100,8 @@ export async function adminUpdateTicketStatus(
     revalidatePath(`/admin/suporte/${ticketId}`);
     revalidatePath('/painel/suporte');
     revalidatePath(`/painel/suporte/${ticketId}`);
-    if (status === 'open' || status === 'in_progress') {
-      await runSupportAi(ticketId);
-    }
+    // Ação de humano: nunca dispara a IA. Ela só roda na abertura do ticket e
+    // quando o próprio cliente responde.
     return { ok: true, message: 'Status atualizado.' };
   } catch (e: any) {
     return { ok: false, message: e?.message ?? 'Erro inesperado.' };

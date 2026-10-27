@@ -24,6 +24,10 @@ export async function processSupportTicket(ticketId: string) {
 
   const ticket = lockTicket as SupportTicket;
 
+  // Delay humanizado: 8-25 segundos (simula leitura + pensamento + digitação)
+  const humanDelayMs = 8000 + Math.floor(Math.random() * 17000);
+  await new Promise((r) => setTimeout(r, humanDelayMs));
+
   try {
     const { data: messages } = await admin
       .from('support_messages')

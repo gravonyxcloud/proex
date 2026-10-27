@@ -55,7 +55,7 @@ async function main() {
 
   const existing = new Set(
     listJson.result
-      .filter(r => r.mode === 'allow' && r.notes?.includes('Vercel'))
+      .filter(r => r.mode === 'whitelist' && r.notes?.includes('Vercel'))
       .map(r => r.configuration.value)
   );
 
@@ -66,7 +66,7 @@ async function main() {
       continue;
     }
     const payload = {
-      mode: 'allow',
+      mode: 'whitelist',
       configuration: { target: 'ip_range', value: cidr },
       notes: 'Vercel outbound – Serverless/Edge Functions (auto)',
     };

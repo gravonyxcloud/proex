@@ -2,34 +2,14 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { AdminReplyForm, AdminStatusForm } from '@/components/admin/ticket-forms';
+import { ChatThread } from '@/components/support/chat-thread';
+import { catLabel, relativeTime, StatusPill } from '@/components/support/ticket-status';
 import { createClient } from '@/lib/supabase/server';
-import type { SupportMessage, SupportTicket } from '@/types/db';
+import { getSignedSupportAttachments } from '@/lib/support-attachments';
+import type { SupportAttachment, SupportMessage, SupportTicket } from '@/types/db';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Atender ticket | Admin' };
-
-function statusLabel(s: string) {
-  switch (s) {
-    case 'open':
-      return 'Aberto';
-    case 'in_progress':
-      return 'Em atendimento';
-    case 'waiting_customer':
-      return 'Aguardando cliente';
-    case 'resolved':
-      return 'Resolvido';
-    case 'closed':
-      return 'Fechado';
-    default:
-      return s;
-  }
-}
-
-function senderLabel(type: string) {
-  if (type === 'agent') return 'Suporte (Proex)';
-  if (type === 'system') return 'Sistema / Nota interna';
-  return 'Cliente';
-}
 
 export default async function AdminTicketDetailPage({ params }: { params: { id: string } }) {
   const supabase = createClient();
@@ -53,108 +33,119 @@ export default async function AdminTicketDetailPage({ params }: { params: { id: 
   const t = ticket as SupportTicket;
   const msgs = (messages ?? []) as SupportMessage[];
 
+  // Bucket privado: signed URLs (1h) por render, em lote.
+  const msgAttachments = await Promise.all(
+    msgs.map((m) =>
+      Array.isArray(m.attachments) && m.attachments.length > 0
+        ? getSignedSupportAttachments(m.attachments)
+        : Promise.resolve([] as SupportAttachment[]),
+    ),
+  );
+
+  const temAnexo = msgAttachments.some((x) => x.length > 0);
+
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">{t.ticket_number}</h1>
-            <span className="rounded-full border px-2 py-0.5 text-xs">{statusLabel(t.status)}</span>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">{t.subject}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Cliente: {t.customer_email} · Aberto em {new Date(t.created_at).toLocaleString('pt-BR')}
-          </p>
-        </div>
-        <Link href="/admin/suporte" className="btn-ghost">
-          ← Voltar para fila
+    <div className="mx-auto max-w-6xl space-y-5">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Link href="/admin/suporte" className="hover:text-foreground">
+          Suporte
         </Link>
+        <span aria-hidden>/</span>
+        <span className="font-mono">{t.ticket_number}</span>
+      </div>
+
+      <header className="surface flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="truncate font-display text-xl font-semibold">{t.subject}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+            <StatusPill status={t.status} />
+            <span>{catLabel(t.category)}</span>
+            <span aria-hidden>·</span>
+            <span className="truncate">{t.customer_email}</span>
+            <span aria-hidden>·</span>
+            <time dateTime={t.created_at}>aberto {relativeTime(t.created_at)}</time>
+          </div>
+        </div>
+
+        {!t.ai_enabled && t.ai_handoff_at && (
+          <div className="shrink-0 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-2.5 text-xs">
+            <p className="font-medium text-amber-300">IA pausada neste ticket</p>
+            <p className="mt-0.5 max-w-[34ch] text-muted-foreground">
+              {t.ai_handoff_reason ?? 'Motivo não registrado.'}
+            </p>
+          </div>
+        )}
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-6 lg:col-span-2">
-          <section className="surface">
-            <div className="border-b border-border px-6 py-4">
-              <h2 className="text-sm font-semibold">Conversa (inclui notas internas)</h2>
-            </div>
-            <div className="divide-y divide-border">
-              {msgs.length === 0 ? (
-                <p className="px-6 py-6 text-sm text-muted-foreground">Sem mensagens.</p>
-              ) : (
-                msgs.map((m) => (
-                  <article
-                    key={m.id}
-                    className={`px-6 py-5 ${m.internal_note ? 'bg-amber-500/5' : m.sender_type === 'agent' ? 'bg-primary/5' : ''}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{senderLabel(m.sender_type)}</span>
-                        {m.internal_note && (
-                          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-400">
-                            Nota interna
-                          </span>
-                        )}
-                        {m.sender_type === 'agent' && !m.internal_note && (
-                          <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary">
-                            Atendente
-                          </span>
-                        )}
-                      </div>
-                      <time className="text-xs text-muted-foreground">
-                        {new Date(m.created_at).toLocaleString('pt-BR')}
-                      </time>
-                    </div>
-                    <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">{m.message}</div>
-                  </article>
-                ))
-              )}
-            </div>
-          </section>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <section className="surface flex min-h-[60vh] flex-col overflow-hidden">
+          <div className="flex items-center justify-between border-b border-border px-5 py-3">
+            <h2 className="text-sm font-semibold">Conversa</h2>
+            <span className="text-[11px] text-muted-foreground">
+              {msgs.length} {msgs.length === 1 ? 'mensagem' : 'mensagens'}
+            </span>
+          </div>
 
-          <section className="surface p-6">
-            <h2 className="text-sm font-semibold">Responder ao cliente</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Ao responder sem marcar &quot;nota interna&quot;, o status vira &quot;Aguardando cliente&quot;.
-            </p>
-            <AdminReplyForm ticketId={t.id} />
-          </section>
-        </div>
+          <div className="flex-1 overflow-y-auto">
+            <ChatThread
+              messages={msgs}
+              viewer="admin"
+              attachments={msgAttachments}
+              emptyLabel="O cliente ainda não escreveu."
+            />
+          </div>
 
-        <aside className="space-y-6">
-          <section className="surface p-6">
-            <h2 className="text-sm font-semibold">Gerenciar ticket</h2>
+          <AdminReplyForm ticketId={t.id} />
+        </section>
+
+        <aside className="space-y-5">
+          <section className="surface p-5">
+            <h2 className="text-sm font-semibold">Gerenciar</h2>
             <AdminStatusForm ticketId={t.id} status={t.status} priority={t.priority} />
           </section>
 
-          {Array.isArray(t.context_snapshot) && t.context_snapshot.length > 0 && (
-            <section className="surface p-6">
-              <h2 className="text-sm font-semibold">Contexto da conta</h2>
+          <section className="surface p-5">
+            <h2 className="text-sm font-semibold">Contexto da conta</h2>
+            {Array.isArray(t.context_snapshot) && t.context_snapshot.length > 0 ? (
               <ul className="mt-3 space-y-2 text-sm">
-                {t.context_snapshot.map((c: any, i: number) => (
-                  <li key={i} className="rounded-lg border border-border px-3 py-2">
-                    <div className="font-medium">{c.label}</div>
-                    {c.detail && <div className="mt-0.5 text-xs text-muted-foreground">{c.detail}</div>}
+                {t.context_snapshot.map((c, i) => (
+                  <li key={c.id ?? i} className="rounded-lg border border-border px-3 py-2">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                      {c.type === 'license' ? 'Licença' : 'Pedido'}
+                    </div>
+                    <div className="mt-0.5 text-xs font-medium">{c.label}</div>
+                    {c.detail && <div className="mt-0.5 text-[11px] text-muted-foreground">{c.detail}</div>}
                   </li>
                 ))}
               </ul>
-            </section>
-          )}
+            ) : (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Sem licenças ou pedidos vinculados — conta sem histórico de compra.
+              </p>
+            )}
+          </section>
 
-          <section className="surface p-6">
-            <h2 className="text-sm font-semibold">Dados</h2>
-            <dl className="mt-3 space-y-2 text-sm">
-              <div>
-                <dt className="text-xs text-muted-foreground">Categoria</dt>
-                <dd>{t.category}</dd>
+          <section className="surface p-5">
+            <h2 className="text-sm font-semibold">Detalhes</h2>
+            <dl className="mt-3 space-y-2 text-xs">
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Prioridade</dt>
+                <dd>{t.priority}</dd>
               </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">Criado em</dt>
-                <dd>{new Date(t.created_at).toLocaleString('pt-BR')}</dd>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Anexos</dt>
+                <dd>{temAnexo ? 'sim' : 'nenhum'}</dd>
               </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">Última mensagem</dt>
-                <dd>{new Date(t.last_message_at).toLocaleString('pt-BR')}</dd>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Última mensagem</dt>
+                <dd>{relativeTime(t.last_message_at)}</dd>
               </div>
+              {t.ai_last_reply_at && (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">Última resposta da IA</dt>
+                  <dd>{relativeTime(t.ai_last_reply_at)}</dd>
+                </div>
+              )}
             </dl>
           </section>
         </aside>
